@@ -3,12 +3,5 @@
   "devCommand": "pnpm dev",
   "installCommand": "pnpm install",
   "framework": null,
-  "outputDirectory": "dist",
-  "regions": ["sfo1"],
-  "functions": {
-    "dist/index.js": {
-      "memory": 1024,
-      "maxDuration": 60
-    }
-  }
+  "outputDirectory": "dist"
 }
