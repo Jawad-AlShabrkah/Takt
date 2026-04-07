@@ -63,7 +63,7 @@
 - [ ] Implement movement history log viewer
 
 ## Testing & Validation
-- [ ] Write unit tests for API routes
+- [x] Write unit tests for API routes
 - [ ] Write integration tests for drag-and-drop functionality
 - [ ] Write tests for role-based visibility filtering
 - [ ] Test database migrations and seed data
