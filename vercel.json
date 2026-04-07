@@ -4,7 +4,6 @@
   "framework": null,
   "outputDirectory": "dist/public",
   "rewrites": [
-    { "source": "/api/trpc/:path*", "destination": "/api?__trpc=:path*" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

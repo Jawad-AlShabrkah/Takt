@@ -26,6 +26,9 @@ export async function getDb() {
         uri: process.env.DATABASE_URL,
         ssl: { rejectUnauthorized: true },
         connectionLimit: 5,
+        connectTimeout: 8000,
+        waitForConnections: true,
+        queueLimit: 10,
       });
       _db = drizzle(pool);
     } catch (error) {

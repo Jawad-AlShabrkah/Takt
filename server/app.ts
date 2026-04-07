@@ -184,14 +184,15 @@ export async function runStartupTasks() {
       )`,
     ];
 
-    try {
-      for (const stmt of tables) {
-        await db.execute(sql.raw(stmt));
-      }
-      console.log("[Setup] Database schema verified");
-    } catch (err) {
-      console.error("[Setup] Schema setup failed:", err);
-    }
+    // Run all CREATE TABLE statements in parallel to reduce cold-start time
+    await Promise.all(
+      tables.map((stmt) =>
+        db.execute(sql.raw(stmt)).catch((err) => {
+          console.error("[Setup] Table creation failed:", err);
+        })
+      )
+    );
+    console.log("[Setup] Database schema verified");
   }
 
   // 2. Create admin user if env vars are set
