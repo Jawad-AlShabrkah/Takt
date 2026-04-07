@@ -1,26 +1,43 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import app, { runStartupTasks } from "./app";
 
-// Kick off DB setup immediately on cold start — but DON'T block requests on it.
-// Vercel functions timeout at 10s (hobby) / 60s (pro). A slow TiDB cold-start
-// used to block `await ready`, causing the function to be killed → empty body.
-let _startupRan = false;
-function ensureStartup() {
-  if (_startupRan) return;
-  _startupRan = true;
+// Fire DB setup in the background — NEVER block requests on it.
+// Previously `await ready` held every request hostage while TiDB cold-started
+// (up to 8s), causing Vercel to kill the function and return an empty body.
+let _startupFired = false;
+function fireStartup() {
+  if (_startupFired) return;
+  _startupFired = true;
   runStartupTasks().catch((err) => {
-    console.error("[Startup] Failed:", err);
+    console.error("[Startup]", err);
+    _startupFired = false; // allow retry on next request
   });
 }
 
-export default async function handler(
-  req: IncomingMessage,
-  res: ServerResponse
-) {
-  // Fire startup in background — don't wait for it.
-  ensureStartup();
+export default function handler(req: IncomingMessage, res: ServerResponse) {
+  fireStartup();
 
-  console.log("[Handler] method:", req.method, "url:", req.url);
+  // --- Reconstruct the original tRPC URL --------------------------------
+  // vercel.json rewrites /api/trpc/:path* → /api?__trpc=:path*
+  // We read __trpc from the query string and rebuild the full path so that
+  // Express can match the /api/trpc middleware.
+  try {
+    if (req.url) {
+      const qmark = req.url.indexOf("?");
+      const qs = qmark === -1 ? "" : req.url.slice(qmark + 1);
+      const params = new URLSearchParams(qs);
+      const trpcPath = params.get("__trpc");
+      if (trpcPath) {
+        params.delete("__trpc");
+        const remaining = params.toString();
+        req.url = `/api/trpc/${trpcPath}${remaining ? `?${remaining}` : ""}`;
+      }
+    }
+  } catch {
+    // leave req.url as-is
+  }
+
+  console.log("[Handler]", req.method, req.url);
 
   return new Promise<void>((resolve) => {
     res.on("finish", resolve);
