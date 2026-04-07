@@ -2,7 +2,7 @@
   "buildCommand": "pnpm db:push && pnpm build",
   "devCommand": "pnpm dev",
   "installCommand": "pnpm install",
-  "framework": "other",
+  "framework": null,
   "outputDirectory": "dist",
   "regions": ["sfo1"],
   "functions": {
