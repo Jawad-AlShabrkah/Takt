@@ -2,7 +2,7 @@ import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
 import {
   getAreas,
   getAreaById,
@@ -28,12 +28,29 @@ import {
 } from "./db";
 
 // ============================================================================
+// INPUT SANITIZATION
+// ============================================================================
+
+/** Strip HTML tags and dangerous characters from user input to prevent XSS */
+function sanitize(input: string): string {
+  return input
+    .replace(/[<>]/g, "") // strip angle brackets (HTML tags)
+    .replace(/javascript:/gi, "") // strip javascript: URIs
+    .replace(/on\w+\s*=/gi, "") // strip inline event handlers (onclick=, etc.)
+    .trim();
+}
+
+/** Zod transform that sanitizes a string value */
+const sanitizedString = (schema: z.ZodString) =>
+  schema.transform((val) => sanitize(val));
+
+// ============================================================================
 // VALIDATION SCHEMAS
 // ============================================================================
 
 const AreaSchema = z.object({
-  name: z.string().min(1, "Area name is required"),
-  description: z.string().optional(),
+  name: sanitizedString(z.string().min(1, "Area name is required")),
+  description: z.string().optional().transform((val) => val ? sanitize(val) : val),
   widthX: z.number().positive("Width must be positive"),
   heightY: z.number().positive("Height must be positive"),
   colorCode: z.string().regex(/^#[0-9A-F]{6}$/i, "Invalid color code").optional(),
@@ -41,15 +58,15 @@ const AreaSchema = z.object({
 });
 
 const ProductSchema = z.object({
-  sdNumber: z.string().min(1, "SD Number is required"),
-  salesNumber: z.string().optional(),
-  name: z.string().min(1, "Product name is required"),
+  sdNumber: sanitizedString(z.string().min(1, "SD Number is required")),
+  salesNumber: z.string().optional().transform((val) => val ? sanitize(val) : val),
+  name: sanitizedString(z.string().min(1, "Product name is required")),
   categoryId: z.number().positive("Valid category is required"),
   currentAreaId: z.number().positive().optional().nullable(),
   positionX: z.number().optional().nullable(),
   positionY: z.number().optional().nullable(),
   status: z.enum(["blue", "yellow", "green"]).optional(),
-  comments: z.string().optional(),
+  comments: z.string().optional().transform((val) => val ? sanitize(val) : val),
   quantity: z.number().positive().optional(),
 });
 
@@ -58,7 +75,7 @@ const ProductCategorySchema = z.object({
   subCategory: z.enum(["ELK-04", "ELK-04C", "ELK-3", "ELK-14"]),
   widthX: z.number().positive("Width must be positive"),
   heightY: z.number().positive("Height must be positive"),
-  description: z.string().optional(),
+  description: z.string().optional().transform((val) => val ? sanitize(val) : val),
 });
 
 // ============================================================================
@@ -76,71 +93,47 @@ const areasRouter = router({
     return area;
   }),
 
-  create: protectedProcedure
+  create: adminProcedure
     .input(AreaSchema)
     .mutation(async ({ input, ctx }) => {
-      // Only admins can create areas
-      if (ctx.user.role !== "admin") {
-        throw new Error("Unauthorized: Only admins can create areas");
-      }
-
       const area = await createArea(input);
 
-      // Log movement
-      if (ctx.user.id) {
-        await createMovement({
-          productId: 0,
-          userId: ctx.user.id,
-          movementType: "created",
-          notes: `Area created: ${area.name}`,
-        });
-      }
+      await createMovement({
+        productId: 0,
+        userId: ctx.user.id,
+        movementType: "created",
+        notes: `Area created: ${area.name}`,
+      });
 
       return area;
     }),
 
-  update: protectedProcedure
+  update: adminProcedure
     .input(z.object({ id: z.number(), data: AreaSchema.partial() }))
     .mutation(async ({ input, ctx }) => {
-      // Only admins can update areas
-      if (ctx.user.role !== "admin") {
-        throw new Error("Unauthorized: Only admins can update areas");
-      }
-
       const area = await updateArea(input.id, input.data);
 
-      // Log movement
-      if (ctx.user.id) {
-        await createMovement({
-          productId: 0,
-          userId: ctx.user.id,
-          movementType: "created",
-          notes: `Area updated: ${area.name}`,
-        });
-      }
+      await createMovement({
+        productId: 0,
+        userId: ctx.user.id,
+        movementType: "created",
+        notes: `Area updated: ${area.name}`,
+      });
 
       return area;
     }),
 
-  delete: protectedProcedure
+  delete: adminProcedure
     .input(z.number())
     .mutation(async ({ input, ctx }) => {
-      // Only admins can delete areas
-      if (ctx.user.role !== "admin") {
-        throw new Error("Unauthorized: Only admins can delete areas");
-      }
-
       await deleteArea(input);
 
-      // Log movement
-      if (ctx.user.id) {
-        await createMovement({
-          productId: 0,
-          userId: ctx.user.id,
-          movementType: "created",
-          notes: `Area deleted: ID ${input}`,
-        });
-      }
+      await createMovement({
+        productId: 0,
+        userId: ctx.user.id,
+        movementType: "created",
+        notes: `Area deleted: ID ${input}`,
+      });
 
       return { success: true };
     }),
@@ -161,14 +154,9 @@ const categoriesRouter = router({
     return category;
   }),
 
-  create: protectedProcedure
+  create: adminProcedure
     .input(ProductCategorySchema)
-    .mutation(async ({ input, ctx }) => {
-      // Only admins can create categories
-      if (ctx.user.role !== "admin") {
-        throw new Error("Unauthorized: Only admins can create categories");
-      }
-
+    .mutation(async ({ input }) => {
       return createProductCategory(input);
     }),
 });
@@ -178,7 +166,7 @@ const categoriesRouter = router({
 // ============================================================================
 
 const productsRouter = router({
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z.object({
         areaId: z.number().optional(),
@@ -189,8 +177,7 @@ const productsRouter = router({
       let products = await getProducts(input);
 
       // Apply visibility filtering based on user role
-      if (ctx.user?.role === "external") {
-        // External users can only see products, not metadata
+      if (ctx.user.role === "external") {
         products = products.map((p) => ({
           ...p,
           sdNumber: "***",
@@ -202,12 +189,11 @@ const productsRouter = router({
       return products;
     }),
 
-  getById: publicProcedure.input(z.number()).query(async ({ input, ctx }) => {
+  getById: protectedProcedure.input(z.number()).query(async ({ input, ctx }) => {
     const product = await getProductById(input);
     if (!product) throw new Error("Product not found");
 
-    // Apply visibility filtering
-    if (ctx.user?.role === "external") {
+    if (ctx.user.role === "external") {
       return {
         ...product,
         sdNumber: "***",
@@ -219,14 +205,13 @@ const productsRouter = router({
     return product;
   }),
 
-  getBySDNumber: publicProcedure
+  getBySDNumber: protectedProcedure
     .input(z.string())
     .query(async ({ input, ctx }) => {
       const product = await getProductBySDNumber(input);
       if (!product) throw new Error("Product not found");
 
-      // Apply visibility filtering
-      if (ctx.user?.role === "external") {
+      if (ctx.user.role === "external") {
         return {
           ...product,
           sdNumber: "***",
@@ -326,14 +311,9 @@ const productsRouter = router({
       return product;
     }),
 
-  delete: protectedProcedure
+  delete: adminProcedure
     .input(z.number())
-    .mutation(async ({ input, ctx }) => {
-      // Only admins can delete products
-      if (ctx.user.role !== "admin") {
-        throw new Error("Unauthorized: Only admins can delete products");
-      }
-
+    .mutation(async ({ input }) => {
       await deleteProduct(input);
 
       return { success: true };
@@ -433,24 +413,20 @@ const productsRouter = router({
 // ============================================================================
 
 const movementsRouter = router({
-  getProductHistory: publicProcedure
+  getProductHistory: protectedProcedure
     .input(z.number())
     .query(async ({ input, ctx }) => {
-      const movements = await getProductMovements(input);
-
-      // External users cannot see movement history
-      if (ctx.user?.role === "external") {
+      if (ctx.user.role === "external") {
         throw new Error("Unauthorized: External users cannot view movement history");
       }
 
-      return movements;
+      return getProductMovements(input);
     }),
 
-  getRecent: publicProcedure
+  getRecent: protectedProcedure
     .input(z.object({ limit: z.number().optional() }))
     .query(async ({ input, ctx }) => {
-      // External users cannot see movement history
-      if (ctx.user?.role === "external") {
+      if (ctx.user.role === "external") {
         throw new Error("Unauthorized: External users cannot view movement history");
       }
 
@@ -463,18 +439,16 @@ const movementsRouter = router({
 // ============================================================================
 
 const analyticsRouter = router({
-  getOccupancy: publicProcedure.query(async ({ ctx }) => {
-    // External users cannot see analytics
-    if (ctx.user?.role === "external") {
+  getOccupancy: protectedProcedure.query(async ({ ctx }) => {
+    if (ctx.user.role === "external") {
       throw new Error("Unauthorized: External users cannot view analytics");
     }
 
     return getAreaOccupancy();
   }),
 
-  getStatusDistribution: publicProcedure.query(async ({ ctx }) => {
-    // External users cannot see analytics
-    if (ctx.user?.role === "external") {
+  getStatusDistribution: protectedProcedure.query(async ({ ctx }) => {
+    if (ctx.user.role === "external") {
       throw new Error("Unauthorized: External users cannot view analytics");
     }
 
