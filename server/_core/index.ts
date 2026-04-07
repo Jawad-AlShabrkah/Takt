@@ -9,6 +9,8 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { sdk } from "./sdk";
+import { getUserByEmail, upsertUser } from "../db";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -27,6 +29,38 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
     }
   }
   throw new Error(`No available port found starting from ${startPort}`);
+}
+
+/**
+ * On first boot: if ADMIN_EMAIL + ADMIN_PASSWORD env vars are set and no
+ * account exists yet for that email, create the admin user automatically.
+ * This removes the need to run any terminal commands after deployment.
+ */
+async function maybeCreateAdminUser() {
+  const email = process.env.ADMIN_EMAIL?.trim();
+  const password = process.env.ADMIN_PASSWORD;
+
+  if (!email || !password) return;
+
+  try {
+    const existing = await getUserByEmail(email);
+    if (existing) return; // already exists, nothing to do
+
+    const passwordHash = await sdk.hashPassword(password);
+    await upsertUser({
+      openId: email,
+      email,
+      name: "Admin",
+      passwordHash,
+      loginMethod: "password",
+      role: "admin",
+      lastSignedIn: new Date(),
+    });
+    console.log(`[Setup] Admin user created: ${email}`);
+  } catch (err) {
+    // Non-fatal — DB might not be ready yet or user already exists
+    console.warn("[Setup] Could not create admin user:", err);
+  }
 }
 
 async function startServer() {
@@ -107,6 +141,9 @@ async function startServer() {
   } else {
     serveStatic(app);
   }
+
+  // Auto-create admin user on first boot (no terminal needed)
+  await maybeCreateAdminUser();
 
   const preferredPort = parseInt(process.env.PORT || "3000");
   const port = await findAvailablePort(preferredPort);
