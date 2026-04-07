@@ -39,7 +39,7 @@ app.use(
         scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "blob:"],
-        connectSrc: ["'self'"],
+        connectSrc: ["'self'", "https:", "wss:"],
         fontSrc: ["'self'", "data:"],
         objectSrc: ["'none'"],
         frameAncestors: ["'self'"],
@@ -75,6 +75,11 @@ app.use(
 // Body parser
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+// Health check (useful for debugging Vercel routing)
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, ts: Date.now() });
+});
 
 // tRPC API
 app.use(
