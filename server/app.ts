@@ -81,14 +81,18 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, ts: Date.now() });
 });
 
-// tRPC API
-app.use(
-  "/api/trpc",
-  createExpressMiddleware({
-    router: appRouter,
-    createContext,
-  })
-);
+// tRPC API — mount on /api/trpc (primary)
+const trpcMiddleware = createExpressMiddleware({
+  router: appRouter,
+  createContext,
+});
+app.use("/api/trpc", trpcMiddleware);
+
+// Catch-all: log unmatched requests for debugging, return proper JSON error
+app.use((req, res) => {
+  console.warn("[Express] No route matched:", req.method, req.url);
+  res.status(404).json({ error: "Not found", path: req.url });
+});
 
 // ---------------------------------------------------------------------------
 // Runtime database setup (runs once on cold start)
