@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
+import { sdk } from "./_core/sdk";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
 import {
   getAreas,
@@ -23,8 +24,8 @@ import {
   getRecentMovements,
   getAreaOccupancy,
   getProductStatusDistribution,
-  getVisibilityRuleByRole,
-  getUserById,
+  getUserByEmail,
+  upsertUser,
 } from "./db";
 
 // ============================================================================
@@ -464,13 +465,66 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
+
+    login: publicProcedure
+      .input(z.object({
+        email: z.string().email("Invalid email address"),
+        password: z.string().min(1, "Password is required"),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const user = await getUserByEmail(input.email);
+
+        if (!user || !user.passwordHash) {
+          // Constant-time-ish rejection to avoid user enumeration
+          await sdk.verifyPassword("dummy", "$2b$12$invalidhashXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
+          throw new Error("Invalid email or password");
+        }
+
+        const valid = await sdk.verifyPassword(input.password, user.passwordHash);
+        if (!valid) throw new Error("Invalid email or password");
+
+        const token = await sdk.createSessionToken(user.openId, {
+          name: user.name ?? "",
+          expiresInMs: ONE_YEAR_MS,
+        });
+
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+
+        return { success: true } as const;
+      }),
+
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return {
-        success: true,
-      } as const;
+      return { success: true } as const;
     }),
+
+    createUser: adminProcedure
+      .input(z.object({
+        email: z.string().email("Invalid email address"),
+        password: z.string().min(8, "Password must be at least 8 characters"),
+        name: z.string().min(1, "Name is required"),
+        role: z.enum(["user", "admin", "external"]),
+      }))
+      .mutation(async ({ input }) => {
+        const existing = await getUserByEmail(input.email);
+        if (existing) throw new Error("A user with this email already exists");
+
+        const passwordHash = await sdk.hashPassword(input.password);
+        await upsertUser({
+          openId: input.email,
+          email: input.email,
+          name: input.name,
+          passwordHash,
+          loginMethod: "password",
+          role: input.role,
+          lastSignedIn: new Date(),
+        });
+
+        const user = await getUserByEmail(input.email);
+        return { success: true, user } as const;
+      }),
   }),
 
   areas: areasRouter,
