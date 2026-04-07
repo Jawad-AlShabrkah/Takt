@@ -89,7 +89,7 @@ export default function Navigation() {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <Button size="sm" onClick={() => window.location.href = "/api/oauth/login"}>
+              <Button size="sm" onClick={() => window.location.href = "/login"}>
                 Login
               </Button>
             )}

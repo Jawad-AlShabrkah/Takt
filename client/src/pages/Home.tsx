@@ -27,7 +27,7 @@ export default function Home() {
           {/* CTA Button */}
           <Button
             size="lg"
-            onClick={() => (window.location.href = "/api/oauth/login")}
+            onClick={() => (window.location.href = "/login")}
             className="gap-2 h-12 px-8 text-base"
           >
             Get Started
