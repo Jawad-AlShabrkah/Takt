@@ -5,12 +5,20 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
+import FactoryFloor from "./pages/FactoryFloor";
+import Dashboard from "./pages/Dashboard";
+import ProductManagement from "./pages/ProductManagement";
+import AreaManagement from "./pages/AreaManagement";
+import Navigation from "./components/Navigation";
 
 function Router() {
-  // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
       <Route path={"/"} component={Home} />
+      <Route path={"/factory-floor"} component={FactoryFloor} />
+      <Route path={"/dashboard"} component={Dashboard} />
+      <Route path={"/products"} component={ProductManagement} />
+      <Route path={"/areas"} component={AreaManagement} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
@@ -18,21 +26,18 @@ function Router() {
   );
 }
 
-// NOTE: About Theme
-// - First choose a default theme according to your design style (dark or light bg), than change color palette in index.css
-//   to keep consistent foreground/background color across components
-// - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
-
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
+      <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <div className="flex h-screen flex-col bg-background text-foreground">
+            <Navigation />
+            <main className="flex-1 overflow-auto">
+              <Router />
+            </main>
+          </div>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
