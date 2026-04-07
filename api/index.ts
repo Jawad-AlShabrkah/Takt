@@ -1,10 +1,9 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
 import app, { runStartupTasks } from "../server/app";
 
-// Run DB setup + admin creation on cold start
-const startupPromise = runStartupTasks();
+// Run DB setup on cold start (non-blocking, errors are caught internally)
+runStartupTasks().catch((err) => {
+  console.error("[Startup] Failed:", err);
+});
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  await startupPromise;
-  app(req as any, res as any);
-}
+// Vercel's @vercel/node natively supports Express apps as default exports
+export default app;
