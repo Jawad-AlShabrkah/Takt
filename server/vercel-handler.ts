@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { URL } from "url";
 import app, { runStartupTasks } from "./app";
 
 // Run DB setup on cold start (non-blocking)
@@ -8,27 +7,48 @@ const ready = runStartupTasks().catch((err) => {
 });
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
-  await ready;
-
-  // Vercel rewrites strip the original URL. We pass the captured path via
-  // a __path query parameter in vercel.json:
-  //   { "source": "/api/:path*", "destination": "/api?__path=:path*" }
-  //
-  // Reconstruct the real URL so Express routing works correctly.
   try {
-    const parsed = new URL(req.url || "/", "http://localhost");
-    const capturedPath = parsed.searchParams.get("__path");
-    if (capturedPath) {
-      // Remove __path from the query string before forwarding
-      parsed.searchParams.delete("__path");
-      const qs = parsed.searchParams.toString();
-      req.url = `/api/${capturedPath}${qs ? `?${qs}` : ""}`;
-    }
+    await ready;
   } catch {
-    // If URL parsing fails, leave req.url as-is
+    // startup already logged, continue
   }
 
-  console.log("[Handler] final req.url:", req.url, "| method:", req.method);
+  // --- URL reconstruction ---------------------------------------------------
+  // Vercel rewrites route all /api/* requests to this single function, but
+  // the rewrite can strip the original path. We need Express to see the real
+  // URL (e.g. /api/trpc/auth.login) so the tRPC middleware matches.
+  //
+  // Strategy: try multiple sources for the original URL.
+
+  const rawUrl = req.url || "/";
+  let finalUrl = rawUrl;
+
+  // 1. Check __trpc query parameter (our vercel.json passes the tRPC procedure path)
+  const qIdx = rawUrl.indexOf("?");
+  if (qIdx !== -1) {
+    const params = new URLSearchParams(rawUrl.slice(qIdx + 1));
+    const capturedPath = params.get("__trpc");
+    if (capturedPath) {
+      params.delete("__trpc");
+      const remaining = params.toString();
+      finalUrl = `/api/trpc/${capturedPath}${remaining ? `?${remaining}` : ""}`;
+    }
+  }
+
+  // 2. If URL still looks like just /api or /, check Vercel headers
+  if (finalUrl === "/" || finalUrl === "/api" || finalUrl === "/api/") {
+    // x-matched-path contains the source pattern; x-invoke-path has the real path
+    const invokedPath =
+      (req.headers["x-invoke-path"] as string) ||
+      (req.headers["x-original-url"] as string) ||
+      (req.headers["x-forwarded-uri"] as string);
+    if (invokedPath && invokedPath.startsWith("/api/")) {
+      finalUrl = invokedPath;
+    }
+  }
+
+  req.url = finalUrl;
+  console.log("[Handler] method:", req.method, "url:", req.url);
 
   return new Promise<void>((resolve) => {
     res.on("finish", resolve);
