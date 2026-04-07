@@ -46,7 +46,11 @@ export function registerOAuthRoutes(app: Express) {
 
       res.redirect(302, "/");
     } catch (error) {
-      console.error("[OAuth] Callback failed", error);
+      const clientIp = req.ip || req.headers["x-forwarded-for"] || "unknown";
+      console.error(
+        `[OAuth] Callback failed | IP: ${clientIp} | code: ${code ? "present" : "missing"} | state: ${state ? "present" : "missing"}`,
+        error
+      );
       res.status(500).json({ error: "OAuth callback failed" });
     }
   });
